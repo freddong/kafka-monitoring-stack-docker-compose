@@ -25,6 +25,7 @@ services:
      - ./grafana/provisioning:/etc/grafana/provisioning
      - ./grafana/dashboards:/var/lib/grafana/dashboards
     container_name: grafana
+    restart: always 
     depends_on:
      - prometheus
     networks:
@@ -50,6 +51,13 @@ services:
     volumes:
      - ./etc/jmx_exporter/config_kafka101.yml:/etc/jmx_exporter/config.yml
     container_name: jmx-kafka101
+    ulimits:
+      nproc: 10000
+      nofile:
+        soft: 10000
+        hard: 10000
+    restart: always 
+
     depends_on:
      - kafka101
     networks:
@@ -80,13 +88,13 @@ services:
       KAFKA_BROKER_ID: 101
       KAFKA_JMX_PORT: 9991
       KAFKA_ZOOKEEPER_CONNECT: zookeeper1:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka101:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka101:29092,PLAINTEXT_HOST://kafka.local:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_LOG_RETENTION_MS: 60000
+      KAFKA_LOG_RETENTION_MS: -1
       CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka101:29092
       CONFLUENT_METRICS_REPORTER_ZOOKEEPER_CONNECT: zookeeper1:2181
       CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
@@ -94,6 +102,64 @@ services:
       KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS}
     networks:
       - kafka-platform
+
+  kafka-schema-registry:
+    image: confluentinc/cp-schema-registry:${CONFLUENT_VERSION}
+    hostname: kafka-schema-registry
+    container_name: kafka-schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka101:29092
+      SCHEMA_REGISTRY_HOST_NAME: kafka-schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_OPTS: ${SCHEMA_REGISTRY_HEAP_OPTS}
+    depends_on:
+      - zk1
+      - kafka101
+    mem_limit: ${SCHEMA_REGISTRY_MEM_LIMIT}
+    restart: always 
+
+#  ksqldb-server:
+#    image: confluentinc/cp-ksqldb-server:${CONFLUENT_VERSION}
+#    hostname: ksqldb-server
+#    ports:
+#      - "8088:8088"
+#    environment:
+#      KSQL_BOOTSTRAP_SERVERS: PLAINTEXT://kafka101:29092
+#      KSQL_LISTENERS: http://0.0.0.0:8088/
+#      KSQL_KSQL_SCHEMA_REGISTRY_URL: http://kafka-schema-registry:8081
+#      KSQL_KSQL_EXTENSION_DIR: /var/lib/ksql/extension
+#      KSQL_KSQL_SERVICE_ID: ksqldb-server_
+#      #KSQL_HEAP_OPTS: ${KAFKA_KSQL_HEAP_OPTS}
+#    depends_on:
+#      - zk1
+#      - kafka101
+#    volumes:
+#      - ./ksqldb-extensions:/var/lib/ksql/extension/
+#    mem_limit: ${KAFKA_KSQL_MEM_LIMIT}
+#    #restart: always 
+
+  console:
+    image: docker.redpanda.com/vectorized/console:latest
+    entrypoint: /bin/sh
+    command: -c "echo \"$$CONSOLE_CONFIG_FILE\" > /tmp/config.yml; /app/console"
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["kafka101:29092"]
+          messagePack:
+            enabled: true
+            topicNames: ["/ht-.*/"]
+    ports:
+      - 9192:8080
+    networks:
+      - kafka-platform
+    depends_on:
+     - kafka101
+    restart: always 
+
 
 networks:
   kafka-platform:

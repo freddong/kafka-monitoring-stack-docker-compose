@@ -25,6 +25,7 @@ services:
      - ./grafana/provisioning:/etc/grafana/provisioning
      - ./grafana/dashboards:/var/lib/grafana/dashboards
     container_name: grafana
+    restart: always 
     depends_on:
      - prometheus
 
@@ -36,6 +37,7 @@ services:
      - ./etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     command: "--config.file=/etc/prometheus/prometheus.yml"
     container_name: prometheus
+    restart: always 
 
   jmx-kafka101:
     image: "sscaling/jmx-prometheus-exporter"
@@ -47,6 +49,12 @@ services:
     volumes:
      - ./etc/jmx_exporter/config_kafka101.yml:/etc/jmx_exporter/config.yml
     container_name: jmx-kafka101
+    ulimits:
+      nproc: 10000
+      nofile:
+        soft: 10000
+        hard: 10000
+    restart: always 
     depends_on:
      - kafka101
 
@@ -60,6 +68,7 @@ services:
     ports:
      - "2181:2181"
     container_name: zookeeper1
+    restart: always 
 
   kafka101:
     image: confluentinc/cp-kafka:${CONFLUENT_VERSION}
@@ -80,6 +89,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_MS: -1
       CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka101:29092
       CONFLUENT_METRICS_REPORTER_ZOOKEEPER_CONNECT: zookeeper1:2181
       CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
@@ -176,25 +186,47 @@ services:
     environment:
       HTTP_PORT: 8000
       AUTO_CONNECT_CONNECTION_STRING: zookeeper1:2181
+    restart: always 
     depends_on:
       - zk1
 
-  akhq:
-    image: tchiotludo/akhq:${AKHQ_VERSION}
-    container_name: akhq
+#  akhq:
+#    image: tchiotludo/akhq:${AKHQ_VERSION}
+#    container_name: akhq
+#    environment:
+#      AKHQ_CONFIGURATION: |
+#        akhq:
+#          connections:
+#            docker-kafka-server:
+#              properties:
+#                bootstrap.servers: "kafka101:29092"
+#              schema-registry:
+#                url: "http://kafka-schema-registry:8081"
+##              connect:
+##                url: "http://connect:8083"
+#    ports:
+#      - "9192:8080"
+#    restart: always 
+#    depends_on:
+#      - kafka101
+#      - kafka-schema-registry
+
+  console:
+    image: docker.redpanda.com/vectorized/console:v2.1.1
+    entrypoint: /bin/sh
+    command: -c "echo \"$$CONSOLE_CONFIG_FILE\" > /tmp/config.yml; /app/console"
     environment:
-      AKHQ_CONFIGURATION: |
-        akhq:
-          connections:
-            docker-kafka-server:
-              properties:
-                bootstrap.servers: "kafka101:29092"
-              schema-registry:
-                url: "http://kafka-schema-registry:8081"
-#              connect:
-#                url: "http://connect:8083"
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["kafka101:29092"]
+          schemaRegistry:
+            enabled: true
+            urls: ["http://kafka-schema-registry:8081"]
     ports:
-      - "8080:8080"
+      - 9192:8080
     depends_on:
       - kafka101
       - kafka-schema-registry
+    restart: always 
+
